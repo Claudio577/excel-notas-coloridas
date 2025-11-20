@@ -5,7 +5,6 @@ import tempfile
 import re
 from openpyxl import load_workbook
 from openpyxl.styles import Font, Alignment
-from openpyxl.utils import get_column_letter
 
 
 st.title("📘 Unificador de Notas – 1º, 2º e 3º Bimestres (Notas Vermelhas < 5)")
@@ -100,7 +99,7 @@ def limpar_planilha(file):
 
 
 # --------------------------------------------------------------
-#  FORMATAÇÃO DO CABEÇALHO EM 2 LINHAS (COM CÉLULAS MESCLADAS)
+#  FORMATAÇÃO DO CABEÇALHO EM 2 LINHAS
 # --------------------------------------------------------------
 
 def formatar_cabecalho_simples(path, df_final):
@@ -118,53 +117,30 @@ def formatar_cabecalho_simples(path, df_final):
     ws["A1"] = "ALUNO"
     ws["A2"] = ""
 
-    # Dicionário para rastrear as colunas por matéria
-    materias_e_colunas = {}
-    
-    # 1. Popula o dicionário de rastreamento de colunas e escreve o Bimestre (Linha 2)
+    ws["A1"].alignment = Alignment(horizontal="center", vertical="center")
+
     col_excel = 2
+    
+    # Itera sobre as colunas do DataFrame final para escrever o cabeçalho
     for col in df_final.columns:
         if col == "ALUNO":
             continue
 
+        # A coluna no df_final tem o formato "materia_BI" (Ex: 'ciencias_B1')
         partes = col.split("_")
         materia = partes[0]
         bi = partes[1]
 
-        if materia not in materias_e_colunas:
-            materias_e_colunas[materia] = []
-        
-        # Adiciona o número da coluna (2, 3, 4, etc.)
-        materias_e_colunas[materia].append(col_excel) 
+        # Linha 1: Matéria
+        ws.cell(row=1, column=col_excel, value=materia.capitalize())
 
         # Linha 2: Bimestre formatado (Ex: B1 -> 1º Bi)
         bimestre_formatado = bi.replace("B", "") + "º Bi" 
+        
         ws.cell(row=2, column=col_excel, value=bimestre_formatado)
         
         col_excel += 1
 
-    # 2. Mescla as células e escreve a Matéria (Linha 1)
-    for materia, colunas in materias_e_colunas.items():
-        primeira_col = colunas[0]
-        ultima_col = colunas[-1]
-        
-        # Converte o número da coluna para a letra (Ex: 2 -> B)
-        col_inicio_letra = get_column_letter(primeira_col)
-        col_fim_letra = get_column_letter(ultima_col)
-
-        # Mescla as células da Linha 1 (Ex: B1:D1)
-        ws.merge_cells(f'{col_inicio_letra}1:{col_fim_letra}1')
-        
-        # Escreve o nome da Matéria na primeira célula mesclada
-        ws.cell(row=1, column=primeira_col, value=materia.capitalize())
-
-        # Centraliza o texto na célula mesclada
-        ws.cell(row=1, column=primeira_col).alignment = Alignment(horizontal="center", vertical="center")
-
-
-    # Formata a célula ALUNO
-    ws["A1"].alignment = Alignment(horizontal="center", vertical="center")
-    
     wb.save(path)
 
 
