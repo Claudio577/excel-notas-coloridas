@@ -5,7 +5,7 @@ from io import BytesIO
 
 st.set_page_config(page_title="Unificador de Notas", layout="wide")
 
-st.title("📘 Unificar Notas – 1º, 2º e 3º Bimestres")
+st.title("📘 Unificador de Notas – B1 + B2 + B3")
 
 st.write("Envie as três planilhas (1º, 2º e 3º bimestre).")
 
@@ -27,24 +27,25 @@ def limpar_planilha(df_original, sufixo):
     linha = encontrar_linha_aluno(df_original)
 
     if linha is None:
-        raise ValueError("Não foi encontrada a linha 'ALUNO' na planilha.")
+        raise ValueError("❌ Não foi encontrada a linha 'ALUNO' na planilha.")
 
-    df = pd.read_excel(uploaded_file, header=linha)
+    # AQUI estava o erro — corrigido!
+    df = pd.read_excel(df_original, header=linha)
 
     # Remover colunas vazias
     df = df.dropna(axis=1, how='all')
 
-    # Remover linhas onde ALUNO está vazio ou é texto administrativo
+    # Remover registros administrativos
     df = df[df["ALUNO"].astype(str).str.len() > 3]
     df = df[~df["ALUNO"].str.contains("Engajamento|Frequência|Compensada", case=False, na=False)]
 
-    # Renomear colunas removendo números
+    # Renomear colunas sem números
     novas_colunas = {}
     for col in df.columns:
         novo = re.sub(r"\d+", "", col).strip().replace("  ", " ")
         novas_colunas[col] = f"{novo}_{sufixo}"
 
-    novas_colunas["ALUNO"] = "ALUNO"  # manter nome original
+    novas_colunas["ALUNO"] = "ALUNO"
     df = df.rename(columns=novas_colunas)
 
     # Converter notas para número
@@ -63,7 +64,7 @@ def juntar_bimestres(df1, df2, df3):
 
 
 # ------------------------------------------------------------
-# Download com formatação de notas vermelhas
+# Gerar Excel colorido
 # ------------------------------------------------------------
 def gerar_excel_colorido(df):
     output = BytesIO()
@@ -75,14 +76,14 @@ def gerar_excel_colorido(df):
 
     red_format = workbook.add_format({"font_color": "red"})
 
-    # aplicar vermelho onde nota < 5
+    # Aplicar vermelho nas notas < 5
     for row in range(2, len(df) + 2):
         for col in range(1, len(df.columns)):
             val = df.iloc[row - 2, col]
             if pd.notna(val) and isinstance(val, (int, float)) and val < 5:
                 worksheet.write(row, col, val, red_format)
 
-    writer.save()
+    writer.close()
     return output.getvalue()
 
 
@@ -97,7 +98,6 @@ uploaded_b3 = st.file_uploader("📄 Envie o 3º Bimestre", type=["xlsx"])
 if uploaded_b1 and uploaded_b2 and uploaded_b3:
     st.success("✔ Arquivos carregados! Processando...")
 
-    # Processamento
     df1 = limpar_planilha(pd.read_excel(uploaded_b1, header=None), "B1")
     df2 = limpar_planilha(pd.read_excel(uploaded_b2, header=None), "B2")
     df3 = limpar_planilha(pd.read_excel(uploaded_b3, header=None), "B3")
@@ -107,7 +107,6 @@ if uploaded_b1 and uploaded_b2 and uploaded_b3:
     st.subheader("📘 Planilha Final (antes da coloração)")
     st.dataframe(final, height=500)
 
-    # Arquivo para download
     excel_final = gerar_excel_colorido(final)
 
     st.download_button(
