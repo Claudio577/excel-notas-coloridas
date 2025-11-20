@@ -7,47 +7,64 @@ from openpyxl import load_workbook
 from openpyxl.styles import Font, Alignment
 from openpyxl.utils import get_column_letter
 
-st.title("📘 Unificador de Notas – Cabeçalho Agrupado por Matéria")
+
+st.title("📘 Unificador de Notas – 1º, 2º e 3º Bimestres (Notas Vermelhas < 5)")
 
 
-# ---------------------------------------------------------
-# FUNÇÃO PARA DETECTAR ALUNO
-# ---------------------------------------------------------
+# --------------------------------------------------------------
+#  FUNÇÃO PARA DETECTAR SE O TEXTO É UM NOME DE ALUNO REAL
+# --------------------------------------------------------------
+
 def eh_aluno(nome):
     if pd.isna(nome):
         return False
+
     partes = str(nome).split()
+
     if len(partes) < 2:
         return False
+
     if not all(p.isalpha() for p in partes):
         return False
-    if len(partes[0]) <= 2:
+
+    if len(partes[0]) <= 2:  # remove EP, ES, ET, AC...
         return False
+
     return True
 
 
-# ---------------------------------------------------------
-# LIMPEZA DE PLANILHA
-# ---------------------------------------------------------
+# --------------------------------------------------------------
+#  LIMPEZA DAS PLANILHAS
+# --------------------------------------------------------------
+
 def limpar_planilha(file):
     df_raw = pd.read_excel(file, header=None)
 
     try:
         linha_cab = df_raw[df_raw.iloc[:, 0] == "ALUNO"].index[0]
     except:
-        st.error("❌ Planilha sem coluna 'ALUNO'.")
+        st.error("❌ A planilha enviada não contém a coluna 'ALUNO'.")
         st.stop()
 
     df = pd.read_excel(file, header=linha_cab)
 
     df = df[df["ALUNO"].apply(eh_aluno)]
+
     df = df.loc[:, ~df.columns.str.contains("Unnamed")]
     df = df.drop(columns=["SITUAÇÃO", "TOTAL"], errors="ignore")
 
-    def extrair_nota(v):
-        if pd.isna(v):
+    materias_proibidas = ["arte", "esporte", "música", "artes", "big a", "inovação", "inovacao"]
+
+    def coluna_proibida(col):
+        texto = col.lower()
+        return any(p in texto for p in materias_proibidas)
+
+    df = df[[c for c in df.columns if not coluna_proibida(c)]]
+
+    def extrair_nota(valor):
+        if pd.isna(valor):
             return np.nan
-        nums = re.findall(r"\d+", str(v))
+        nums = re.findall(r"\d+", str(valor))
         if not nums:
             return np.nan
         n = int(nums[0])
@@ -62,13 +79,13 @@ def limpar_planilha(file):
 
         df[col] = df[col].apply(extrair_nota)
 
-        if df[col].notna().sum() == 0:
+        if df[col].notna().sum() > 0:
+            colunas_validas.append(col)
+        else:
             continue
 
-        colunas_validas.append(col)
-        materia = re.split(r"\d+", col)[0].strip()
-        if materia == "":
-            materia = col
+        materia = re.split(r"\d+", col)[0].strip().lower()
+
         renomear[col] = materia
 
     df = df[colunas_validas]
@@ -77,12 +94,63 @@ def limpar_planilha(file):
     return df
 
 
-# ---------------------------------------------------------
-# UPLOAD
-# ---------------------------------------------------------
-file_b1 = st.file_uploader("📤 1º Bimestre", type=["xlsx"])
-file_b2 = st.file_uploader("📤 2º Bimestre", type=["xlsx"])
-file_b3 = st.file_uploader("📤 3º Bimestre", type=["xlsx"])
+# --------------------------------------------------------------
+#  FORMATAÇÃO DO CABEÇALHO EM 2 LINHAS
+# --------------------------------------------------------------
+
+def formatar_cabecalho_simples(path, df_final):
+    wb = load_workbook(path)
+    ws = wb.active
+
+    ws.delete_rows(1)
+
+    ws.insert_rows(1)
+    ws.insert_rows(2)
+
+    ws["A1"] = "ALUNO"
+    ws["A2"] = ""
+
+    ws["A1"].alignment = Alignment(horizontal="center", vertical="center")
+
+    col_excel = 2
+
+    colunas_agrupadas = {}
+
+    for col in df_final.columns:
+        if col == "ALUNO":
+            continue
+
+        materia, bi = col.split("_")
+
+        if materia not in colunas_agrupadas:
+            colunas_agrupadas[materia] = {}
+
+        colunas_agrupadas[materia][bi] = col
+
+    for materia in colunas_agrupadas.keys():
+
+        ordem = ["B1", "B2", "B3"]
+
+        for bi in ordem:
+            if bi in colunas_agrupadas[materia]:
+
+                ws.cell(row=1, column=col_excel, value=materia.capitalize())
+
+                bimestre_formatado = bi.replace("B", "ºBi")  # B1 → 1ºBi
+                ws.cell(row=2, column=col_excel, value=bimestre_formatado)
+
+                col_excel += 1
+
+    wb.save(path)
+
+
+# --------------------------------------------------------------
+#  UPLOAD DOS 3 BIMESTRES
+# --------------------------------------------------------------
+
+file_b1 = st.file_uploader("📤 Envie o Excel do 1º Bimestre", type=["xlsx"])
+file_b2 = st.file_uploader("📤 Envie o Excel do 2º Bimestre", type=["xlsx"])
+file_b3 = st.file_uploader("📤 Envie o Excel do 3º Bimestre", type=["xlsx"])
 
 if file_b1 and file_b2 and file_b3:
 
@@ -104,77 +172,42 @@ if file_b1 and file_b2 and file_b3:
     df_final = df_final.fillna("–")
 
     df_final["ordem"] = df_final["ALUNO"].apply(
-        lambda n: ordem_b1.index(n) if n in ordem_b1 else 999
+        lambda nome: ordem_b1.index(nome) if nome in ordem_b1 else 999
     )
-
     df_final = df_final.sort_values("ordem").drop(columns=["ordem"])
 
-    # Salvar temporário para formatação
+    st.subheader("📄 Planilha Final (antes da coloração)")
+    st.dataframe(df_final)
+
     temp_out = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
-    df_final.to_excel(temp_out.name, index=False, header=False)
+    df_final.to_excel(temp_out.name, index=False, startrow=3)
 
-    # ---------------------------------------------------------
-    # APLICAR CABEÇALHO MESCLADO
-    # ---------------------------------------------------------
-    wb = load_workbook(temp_out.name)
-    ws = wb.active
+    formatar_cabecalho_simples(temp_out.name, df_final)
 
-    colunas = df_final.columns.tolist()
+    def colorir_notas(path):
+        wb = load_workbook(path)
+        ws = wb.active
+        red = Font(color="FF0000", bold=True)
 
-    materias = {}
-    for idx, col in enumerate(colunas):
-        if col == "ALUNO":
-            continue
-        materia, bim = col.split("_")
-        bim = bim.replace("B", "") + "ºBi"
-        if materia not in materias:
-            materias[materia] = []
-        materias[materia].append((idx + 1, bim))  # coluna Excel inicia em 1
+        for col in range(2, ws.max_column + 1):
+            for row in range(4, ws.max_row + 1):
+                val = ws.cell(row=row, column=col).value
+                try:
+                    if isinstance(val, (int, float)) and val < 5:
+                        ws.cell(row=row, column=col).font = red
+                except:
+                    pass
 
-    # Criar cabeçalho com mesclagem
-    ws.insert_rows(1)
-    ws.insert_rows(1)
+        wb.save(path)
 
-    ws["A1"] = "ALUNO"
-    ws["A2"] = ""
+    colorir_notas(temp_out.name)
 
-    for materia, cols in materias.items():
-        col_inicio = cols[0][0] + 1
-        col_fim = cols[-1][0] + 1
-
-        ws.merge_cells(start_row=1, start_column=col_inicio,
-                       end_row=1, end_column=col_fim)
-        ws.cell(row=1, column=col_inicio).value = materia
-        ws.cell(row=1, column=col_inicio).alignment = Alignment(horizontal="center")
-
-        for i, (_, nome_bi) in enumerate(cols):
-            ws.cell(row=2, column=col_inicio + i).value = nome_bi
-            ws.cell(row=2, column=col_inicio + i).alignment = Alignment(horizontal="center")
-
-    # ---------------------------------------------------------
-    # COLORIR NOTAS < 5
-    # ---------------------------------------------------------
-    red = Font(color="FF0000", bold=True)
-
-    for r in range(3, ws.max_row + 1):
-        for c in range(2, ws.max_column + 1):
-            val = ws.cell(r, c).value
-            try:
-                if isinstance(val, (int, float)) and val < 5:
-                    ws.cell(r, c).font = red
-            except:
-                pass
-
-    wb.save(temp_out.name)
-
-    # ---------------------------------------------------------
-    # DOWNLOAD
-    # ---------------------------------------------------------
     with open(temp_out.name, "rb") as f:
         st.download_button(
-            "⬇️ Baixar Planilha Formatada",
+            "⬇️ Baixar Planilha Final (Formatada + Notas Vermelhas)",
             f.read(),
-            file_name="notas_unificadas_formatadas.xlsx",
+            file_name="notas_unificadas.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
+
 
