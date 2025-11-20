@@ -3,8 +3,10 @@ import pandas as pd
 import tempfile
 import numpy as np
 import re
+from openpyxl import load_workbook
+from openpyxl.styles import Font
 
-st.title("📘 Extrator Inteligente de Notas – Limpeza Completa (v5)")
+st.title("📘 Extrator Inteligente de Notas – Notas Vermelhas (<5)")
 
 uploaded_file = st.file_uploader("Envie o Excel (.xlsx):", type=["xlsx"])
 
@@ -16,7 +18,6 @@ if uploaded_file:
     df_raw = pd.read_excel(temp_input.name, header=None)
 
     linha_cabecalho = df_raw[df_raw.iloc[:, 0] == "ALUNO"].index[0]
-
     df = pd.read_excel(temp_input.name, header=linha_cabecalho)
 
     df = df.dropna(subset=["ALUNO"])
@@ -50,38 +51,37 @@ if uploaded_file:
 
     df.columns = [limpar_nome_coluna(col) for col in df.columns]
 
-    st.subheader("📄 Resultado Final – Matérias Renomeadas")
-    st.dataframe(df)
-
+    # ---- SALVAR EXCEL ----
     temp_out = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
     df.to_excel(temp_out.name, index=False)
 
+    # ---- COLORIR APENAS A NOTA EM VERMELHO ----
+    def colorir_fonte_vermelha(caminho_excel):
+        wb = load_workbook(caminho_excel)
+        ws = wb.active
+
+        red_font = Font(color="FF0000", bold=True)
+
+        for col in range(2, ws.max_column + 1):   # Ignora coluna ALUNO
+            for row in range(2, ws.max_row + 1):
+                cell = ws.cell(row=row, column=col)
+                try:
+                    if isinstance(cell.value, (int, float)) and cell.value < 5:
+                        cell.font = red_font      # 🔴 AGORA FICA VERMELHO
+                except:
+                    pass
+
+        wb.save(caminho_excel)
+
+    colorir_fonte_vermelha(temp_out.name)
+
+    st.subheader("📄 Planilha gerada (notas < 5 em vermelho)")
+    st.dataframe(df)
+
     with open(temp_out.name, "rb") as f:
         st.download_button(
-            "⬇️ Baixar Planilha Final Completa",
+            "⬇️ Baixar Planilha com Notas Vermelhas",
             data=f.read(),
-            file_name="notas_limpas.xlsx",
+            file_name="notas_coloridas.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
-
-    # ---- BOTÃO PARA NOTAS VERMELHAS ----
-    st.subheader("📌 Filtrar alunos com notas vermelhas (<5)")
-
-    if st.button("Mostrar somente alunos com nota vermelha"):
-        col_notas = [c for c in df.columns if c != "ALUNO"]
-        filtro = df[col_notas].lt(5).any(axis=1)
-        df_vermelhas = df[filtro]
-
-        st.subheader("🚨 Alunos com notas vermelhas:")
-        st.dataframe(df_vermelhas)
-
-        temp_vermelhas = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
-        df_vermelhas.to_excel(temp_vermelhas.name, index=False)
-
-        with open(temp_vermelhas.name, "rb") as f:
-            st.download_button(
-                "⬇️ Baixar alunos com notas vermelhas",
-                data=f.read(),
-                file_name="notas_vermelhas.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
