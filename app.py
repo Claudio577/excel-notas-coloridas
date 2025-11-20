@@ -4,7 +4,7 @@ import tempfile
 import numpy as np
 import re
 
-st.title("📘 Extrator Inteligente de Notas – Limpeza Automática")
+st.title("📘 Extrator Inteligente de Notas – Limpeza Completa (v3)")
 
 uploaded_file = st.file_uploader("Envie o Excel (.xlsx):", type=["xlsx"])
 
@@ -13,41 +13,55 @@ if uploaded_file:
     temp_input.write(uploaded_file.getbuffer())
     temp_input.close()
 
-    # Ler arquivo cru
+    # Ler o arquivo sem cabeçalho
     df_raw = pd.read_excel(temp_input.name, header=None)
 
-    # Achar linha de cabeçalho (onde começa ALUNO)
+    # Buscar onde começa ALUNO
     linha_cabecalho = df_raw[df_raw.iloc[:, 0] == "ALUNO"].index[0]
 
-    # Ler com cabeçalho correto
+    # Ler novamente com cabeçalho correto
     df = pd.read_excel(temp_input.name, header=linha_cabecalho)
 
-    # Remover linhas vazias e colunas Unnamed
+    # Remover linhas sem aluno
     df = df.dropna(subset=["ALUNO"])
+
+    # Remover colunas Unnamed
     df = df.loc[:, ~df.columns.str.contains("Unnamed")]
 
-    # Remover colunas desnecessárias
+    # Remover colunas ruins
     df = df.drop(columns=["SITUAÇÃO", "TOTAL"], errors="ignore")
 
-    # Processar cada coluna
-    colunas_para_remover = []
+    # Função para extrair apenas números entre 0 e 10
+    def extrair_nota(valor):
+        if pd.isna(valor):
+            return np.nan
+        # encontrar números na célula
+        nums = re.findall(r"\d+", str(valor))
+        if not nums:
+            return np.nan
+        # converter para inteiro
+        num = int(nums[0])
+        # se número for nota válida
+        if 0 <= num <= 10:
+            return num
+        return np.nan
 
+    # Processar todas as colunas
+    colunas_para_remover = []
     for col in df.columns:
         if col == "ALUNO":
             continue
 
-        # Extrair números usando regex: pegamos somente o primeiro número da célula
-        df[col] = df[col].astype(str).apply(lambda x: re.findall(r"\d+", x))
-        df[col] = df[col].apply(lambda x: int(x[0]) if x else np.nan)
+        df[col] = df[col].apply(extrair_nota)
 
-        # Se a coluna não possuir nenhum número → remover
+        # Se a coluna inteira ficou vazia → remover
         if df[col].dropna().empty:
             colunas_para_remover.append(col)
 
-    # Remover colunas sem números (ex.: MÚSICA, ARTE com letras)
+    # Remover colunas sem notas reais
     df = df.drop(columns=colunas_para_remover, errors="ignore")
 
-    st.subheader("📄 Resultado Final – Colunas Limpas e Corrigidas")
+    st.subheader("📄 Resultado Final – Apenas Notas Reais (0 a 10)")
     st.dataframe(df)
 
     # Salvar Excel final
