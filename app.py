@@ -11,7 +11,7 @@ st.title("📘 Unificador de Notas – 1º, 2º e 3º Bimestres (Notas Vermelhas
 
 
 # --------------------------------------------------------------
-#  FUNÇÃO PARA DETECTAR SE O TEXTO É UM NOME DE ALUNO REAL
+#  FUNÇÃO PARA DETECTAR SE O TEXTO É UM NOME DE ALUNO REAL
 # --------------------------------------------------------------
 
 def eh_aluno(nome):
@@ -33,7 +33,7 @@ def eh_aluno(nome):
 
 
 # --------------------------------------------------------------
-#  LIMPEZA DAS PLANILHAS
+#  LIMPEZA DAS PLANILHAS
 # --------------------------------------------------------------
 
 def limpar_planilha(file):
@@ -83,12 +83,8 @@ def limpar_planilha(file):
         else:
             continue
 
-        # Tenta pegar o nome da materia antes do numero
-        materia = re.split(r"\d+", col)[0].strip().lower() 
-        
-        # Limpa possíveis separadores no nome da matéria
+        materia = re.split(r"\d+", col)[0].strip().lower()
         materia = materia.replace('-', '').replace('.', '').replace('/', '').strip()
-
 
         renomear[col] = materia
 
@@ -99,53 +95,49 @@ def limpar_planilha(file):
 
 
 # --------------------------------------------------------------
-#  FORMATAÇÃO DO CABEÇALHO EM 2 LINHAS
+#  CABEÇALHO (MATÉRIA MESCLADA + 1º/2º/3º Bi)
 # --------------------------------------------------------------
 
 def formatar_cabecalho_simples(path, df_final):
     wb = load_workbook(path)
     ws = wb.active
 
-    # O df_final foi escrito com startrow=0, entao a L1 tem o cabeçalho do DF ("ALUNO", "matéria_B1", etc.)
-    # Removemos a linha 1 (cabeçalho padrão do DF).
     ws.delete_rows(1)
-    
-    # Inserimos as 2 linhas para o novo cabeçalho (Matéria e Bimestre)
+
     ws.insert_rows(1)
     ws.insert_rows(2)
 
     ws["A1"] = "ALUNO"
-    ws["A2"] = ""
-
     ws["A1"].alignment = Alignment(horizontal="center", vertical="center")
 
     col_excel = 2
-    
-    # Itera sobre as colunas do DataFrame final para escrever o cabeçalho
-    for col in df_final.columns:
-        if col == "ALUNO":
-            continue
 
-        # A coluna no df_final tem o formato "materia_BI" (Ex: 'ciencias_B1')
-        partes = col.split("_")
-        materia = partes[0]
-        bi = partes[1]
+    materias = sorted(list(set([c.split("_")[0] for c in df_final.columns if c != "ALUNO"])))
 
-        # Linha 1: Matéria
+    for materia in materias:
+        cols_bi = []
+        for bi in ["B1", "B2", "B3"]:
+            col_name = f"{materia}_{bi}"
+            if col_name in df_final.columns:
+                cols_bi.append(col_name)
+
+        qtd = len(cols_bi)
+
         ws.cell(row=1, column=col_excel, value=materia.capitalize())
+        if qtd > 1:
+            ws.merge_cells(start_row=1, start_column=col_excel,
+                           end_row=1, end_column=col_excel + qtd - 1)
 
-        # Linha 2: Bimestre formatado (Ex: B1 -> 1º Bi)
-        bimestre_formatado = bi.replace("B", "") + "º Bi" 
-        
-        ws.cell(row=2, column=col_excel, value=bimestre_formatado)
-        
-        col_excel += 1
+        for idx in range(qtd):
+            ws.cell(row=2, column=col_excel + idx, value=f"{idx+1}º Bi")
+
+        col_excel += qtd
 
     wb.save(path)
 
 
 # --------------------------------------------------------------
-#  UPLOAD DOS 3 BIMESTRES
+#  UPLOAD DOS 3 BIMESTRES
 # --------------------------------------------------------------
 
 file_b1 = st.file_uploader("📤 Envie o Excel do 1º Bimestre", type=["xlsx"])
@@ -160,35 +152,43 @@ if file_b1 and file_b2 and file_b3:
     df2 = limpar_planilha(file_b2)
     df3 = limpar_planilha(file_b3)
 
-    # Captura a ordem dos alunos do primeiro bimestre para manter a ordenação
     ordem_b1 = df1["ALUNO"].tolist()
 
-    # Renomeia as colunas de notas para identificar o bimestre
     df1 = df1.rename(columns={c: f"{c}_B1" for c in df1.columns if c != "ALUNO"})
     df2 = df2.rename(columns={c: f"{c}_B2" for c in df2.columns if c != "ALUNO"})
     df3 = df3.rename(columns={c: f"{c}_B3" for c in df3.columns if c != "ALUNO"})
 
-    # Unifica os DataFrames
     df_final = df1.merge(df2, on="ALUNO", how="outer")
     df_final = df_final.merge(df3, on="ALUNO", how="outer")
 
-    # Preenche NaN com traço
     df_final = df_final.fillna("–")
 
-    # Reordena pela lista do 1º bimestre
     df_final["ordem"] = df_final["ALUNO"].apply(
         lambda nome: ordem_b1.index(nome) if nome in ordem_b1 else 999
     )
     df_final = df_final.sort_values("ordem").drop(columns=["ordem"])
 
+    # ------------ AGRUPAR MATÉRIAS (B1–B2–B3) ------------
+    colunas = list(df_final.columns)
+    colunas.remove("ALUNO")
+
+    materias = sorted(list(set(c.split("_")[0] for c in colunas)))
+    nova_ordem = ["ALUNO"]
+
+    for materia in materias:
+        for bi in ["B1", "B2", "B3"]:
+            col = f"{materia}_{bi}"
+            if col in df_final.columns:
+                nova_ordem.append(col)
+
+    df_final = df_final[nova_ordem]
+
     st.subheader("📄 Planilha Final (antes da coloração)")
     st.dataframe(df_final)
 
-    # Salva o DataFrame em um arquivo temporário, começando na Linha 1
     temp_out = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
-    df_final.to_excel(temp_out.name, index=False, startrow=0) 
+    df_final.to_excel(temp_out.name, index=False, startrow=0)
 
-    # Aplica o cabeçalho de 2 linhas e as correções de estrutura
     formatar_cabecalho_simples(temp_out.name, df_final)
 
     def colorir_notas(path):
@@ -196,7 +196,6 @@ if file_b1 and file_b2 and file_b3:
         ws = wb.active
         red = Font(color="FF0000", bold=True)
 
-        # Começa a colorir a partir da Linha 3 (onde os dados do aluno começam agora)
         for col in range(2, ws.max_column + 1):
             for row in range(3, ws.max_row + 1):
                 val = ws.cell(row=row, column=col).value
@@ -208,10 +207,8 @@ if file_b1 and file_b2 and file_b3:
 
         wb.save(path)
 
-    # Colore as notas vermelhas
     colorir_notas(temp_out.name)
 
-    # Botão de download
     with open(temp_out.name, "rb") as f:
         st.download_button(
             "⬇️ Baixar Planilha Final (Formatada + Notas Vermelhas)",
@@ -219,3 +216,4 @@ if file_b1 and file_b2 and file_b3:
             file_name="notas_unificadas.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
+
