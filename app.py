@@ -2,16 +2,16 @@ import streamlit as st
 import pandas as pd
 import tempfile
 
-st.title("📘 Extrator de Notas M (Planilha Escolar)")
+st.title("📘 Extrator de Notas – Versão Simplificada")
 
 st.write("""
-Este aplicativo extrai automaticamente:
+Este app extrai automaticamente:
 - Os **nomes dos alunos**
-- As **notas M** de cada matéria (linha onde aparece o 'M')
-- Ignora F, AC, ES e todas as outras linhas
+- As **notas de todas as matérias**
+- Remove colunas como **SITUAÇÃO**, **TOTAL**, etc.
 """)
 
-uploaded_file = st.file_uploader("Envie o arquivo Excel (.xlsx):", type=["xlsx"])
+uploaded_file = st.file_uploader("Envie o Excel (.xlsx):", type=["xlsx"])
 
 if uploaded_file:
 
@@ -20,60 +20,41 @@ if uploaded_file:
     temp_input.write(uploaded_file.getbuffer())
     temp_input.close()
 
-    # Ler o Excel SEM cabeçalho
     df = pd.read_excel(temp_input.name, header=None)
 
-    st.subheader("Prévia das primeiras linhas:")
+    st.subheader("Primeiras linhas do arquivo detectado:")
     st.dataframe(df.head(20))
 
-    st.info("""
-    Identificação automática:
-    - Linha 11 → Nomes das matérias  
-    - Linha 12 → Notas M  
-    - Linha 14 em diante → Nomes dos alunos  
-    """)
+    st.info("Processando alunos e notas...")
 
-    # Linha 11 → cabeçalho das matérias (index 10)
-    materias = df.iloc[10].values
+    # Linha onde começam os alunos = linha que tem o texto "ALUNO"
+    linha_aluno = df[df.iloc[:, 0] == "ALUNO"].index[0]
 
-    # Linha 12 → notas M (index 11)
-    notas_M = df.iloc[11].values
+    # A linha seguinte é o cabeçalho
+    header_row = linha_aluno
 
-    # Linhas 14 → nomes dos alunos (index 13)
-    alunos = df.iloc[13:, 0].values
+    # O próximo bloco são os alunos
+    dados = pd.read_excel(temp_input.name, header=header_row)
 
-    # Criar DataFrame final
-    notas_expandidas = pd.DataFrame({"aluno": alunos})
+    # Remover linhas em branco
+    dados = dados.dropna(subset=["ALUNO"])
 
-    # Montar coluna por coluna
-    for i in range(1, len(materias)):  # coluna 1 em diante
-        materia = str(materias[i]).strip()
+    # Remover colunas que não queremos
+    colunas_remover = ["SITUAÇÃO", "TOTAL", "None", "Unnamed: 1"]
+    colunas_existentes = [c for c in colunas_remover if c in dados.columns]
+    dados = dados.drop(columns=colunas_existentes, errors="ignore")
 
-        # Corrigir se vier NaN
-        if materia == "nan":
-            continue
+    st.subheader("📄 Resultado Final (alunos + notas):")
+    st.dataframe(dados)
 
-        nota = notas_M[i]
-
-        # Converter nota para número
-        try:
-            nota = float(nota)
-        except:
-            nota = ""
-
-        notas_expandidas[materia] = nota
-
-    st.subheader("📄 Resultado Final – Notas M:")
-    st.dataframe(notas_expandidas)
-
-    # Download
+    # Download da planilha final
     temp_output = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
-    notas_expandidas.to_excel(temp_output.name, index=False)
+    dados.to_excel(temp_output.name, index=False)
 
     with open(temp_output.name, "rb") as f:
         st.download_button(
-            "⬇️ Baixar Planilha com Notas M",
+            "⬇️ Baixar Planilha de Notas (limpa)",
             data=f.read(),
-            file_name="notas_M_extraidas.xlsx",
+            file_name="notas_extraidas.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
