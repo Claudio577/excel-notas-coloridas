@@ -1,157 +1,102 @@
 import streamlit as st
 import pandas as pd
-import numpy as np
-import tempfile
-import re
-from openpyxl import load_workbook
-from openpyxl.styles import Font
+from openpyxl import Workbook
+from openpyxl.styles import PatternFill
 
+st.title("📘 Unificador de Notas - 3 Bimestres (Com Notas <5 em Vermelho)")
 
-st.title("📘 Unificador de Notas – 1º, 2º e 3º Bimestres (Notas Vermelhas < 5)")
+# ----------------------------
+# FUNÇÃO DE LIMPAR PLANILHAS
+# ----------------------------
 
+def limpar_planilha(df):
+    # Remove linhas inúteis
+    df = df.dropna(how="all")
+    df = df.dropna(axis=1, how="all")
 
-# ---------------------------------------------------------------------
-# FUNÇÃO PARA DETECTAR SE O TEXTO É UM NOME DE ALUNO REAL
-# ---------------------------------------------------------------------
+    # Acha a linha onde começa a lista de alunos
+    linha_alunos = df[df.astype(str).apply(lambda row: row.str.contains("ALUNO", case=False)).any(axis=1)].index[0]
+    df.columns = df.iloc[linha_alunos]
+    df = df.iloc[linha_alunos + 1:]
 
-def eh_aluno(nome):
-    if pd.isna(nome):
-        return False
+    # Remove colunas que não são notas
+    df = df[df.columns.dropna()]
+    df = df.loc[:, ~df.columns.astype(str).str.contains("Unnamed")]
 
-    partes = nome.split()
+    # Mantém apenas colunas com ALUNO e números
+    cols_ok = ["ALUNO"] + [c for c in df.columns if df[c].astype(str).str.replace('.', '').str.isdigit().any()]
+    df = df[cols_ok]
 
-    # Tem pelo menos duas palavras
-    if len(partes) < 2:
-        return False
-
-    # Cada parte tem apenas letras
-    if not all(p.isalpha() for p in partes):
-        return False
-
-    # Evitar EP, ES, ET, AC, F, M, etc.
-    if len(partes[0]) <= 2:  
-        return False
-
-    return True
-
-
-# ---------------------------------------------------------------------
-# LIMPEZA DA PLANILHA
-# ---------------------------------------------------------------------
-
-def limpar_planilha(file):
-    df_raw = pd.read_excel(file, header=None)
-
-    # Achar linha do cabeçalho
-    linha_cab = df_raw[df_raw.iloc[:, 0] == "ALUNO"].index[0]
-
-    df = pd.read_excel(file, header=linha_cab)
-
-    # Remover linhas que NÃO são alunos
-    df = df[df["ALUNO"].apply(eh_aluno)]
-
-    # Remover Unnamed
-    df = df.loc[:, ~df.columns.str.contains("Unnamed")]
-
-    # Remover colunas inúteis
-    df = df.drop(columns=["SITUAÇÃO", "TOTAL"], errors="ignore")
-
-    # Extrair notas numéricas apenas
-    def extrair_nota(valor):
-        if pd.isna(valor):
-            return np.nan
-        nums = re.findall(r"\d+", str(valor))
-        if not nums:
-            return np.nan
-        num = int(nums[0])
-        return num if 0 <= num <= 10 else np.nan
-
-    colunas_validas = ["ALUNO"]
-    renomear = {}
-
+    # Converte notas para número
     for col in df.columns:
-        if col == "ALUNO":
-            continue
-
-        df[col] = df[col].apply(extrair_nota)
-
-        # coluna só vale se houver pelo menos uma nota
-        if df[col].notna().sum() > 0:
-            colunas_validas.append(col)
-        else:
-            continue
-
-        # limpar nome da matéria removendo números
-        materia = re.split(r"\d+", col)[0].strip()
-        if materia == "":
-            materia = col
-
-        renomear[col] = materia
-
-    df = df[colunas_validas]
-    df = df.rename(columns=renomear)
+        if col != "ALUNO":
+            df[col] = pd.to_numeric(df[col], errors="coerce")
 
     return df
 
+# ----------------------------
+# PROCESSAMENTO PRINCIPAL
+# ----------------------------
 
-# ---------------------------------------------------------------------
-# UPLOAD DOS 3 BIMESTRES
-# ---------------------------------------------------------------------
+uploaded_b1 = st.file_uploader("📥 Envie o arquivo do 1º Bimestre", type=["xlsx"])
+uploaded_b2 = st.file_uploader("📥 Envie o arquivo do 2º Bimestre", type=["xlsx"])
+uploaded_b3 = st.file_uploader("📥 Envie o arquivo do 3º Bimestre", type=["xlsx"])
 
-file_b1 = st.file_uploader("📤 Envie o Excel do 1º Bimestre", type=["xlsx"])
-file_b2 = st.file_uploader("📤 Envie o Excel do 2º Bimestre", type=["xlsx"])
-file_b3 = st.file_uploader("📤 Envie o Excel do 3º Bimestre", type=["xlsx"])
+if uploaded_b1 and uploaded_b2 and uploaded_b3:
+    st.success("✔ Arquivos carregados!")
 
-if file_b1 and file_b2 and file_b3:
+    df1 = limpar_planilha(pd.read_excel(uploaded_b1))
+    df2 = limpar_planilha(pd.read_excel(uploaded_b2))
+    df3 = limpar_planilha(pd.read_excel(uploaded_b3))
 
-    st.success("Arquivos carregados! Limpando dados...")
-
-    df1 = limpar_planilha(file_b1)
-    df2 = limpar_planilha(file_b2)
-    df3 = limpar_planilha(file_b3)
-
-    # Renomear colunas
+    # Renomeia colunas adicionando o bimestre
     df1 = df1.rename(columns={c: f"{c}_B1" for c in df1.columns if c != "ALUNO"})
     df2 = df2.rename(columns={c: f"{c}_B2" for c in df2.columns if c != "ALUNO"})
     df3 = df3.rename(columns={c: f"{c}_B3" for c in df3.columns if c != "ALUNO"})
 
-    # Unir
-    df_final = df1.merge(df2, on="ALUNO", how="outer")
-    df_final = df_final.merge(df3, on="ALUNO", how="outer")
+    # Junta tudo
+    df_final = df1.merge(df2, on="ALUNO", how="left").merge(df3, on="ALUNO", how="left")
 
-    st.subheader("📄 Planilha Final (antes da coloração)")
+    st.subheader("📄 Prévia (antes da coloração)")
     st.dataframe(df_final)
 
-    # SALVAR
-    temp_out = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
-    df_final.to_excel(temp_out.name, index=False)
+    # ----------------------------
+    # EXPORTAR COM AS NOTAS < 5 EM VERMELHO
+    # ----------------------------
 
-    # -----------------------------------------------------------------
-    # COLORIR NOTAS < 5 EM VERMELHO
-    # -----------------------------------------------------------------
-
-    def colorir_notas(path):
-        wb = load_workbook(path)
+    def exportar_excel_colorido(df):
+        wb = Workbook()
         ws = wb.active
-        red = Font(color="FF0000", bold=True)
 
-        for col in range(2, ws.max_column + 1):  
-            for row in range(2, ws.max_row + 1):
-                cell = ws.cell(row=row, column=col)
+        # Escreve cabeçalhos
+        ws.append(df.columns.tolist())
+
+        red_fill = PatternFill(start_color="FF9999", end_color="FF9999", fill_type="solid")
+
+        # Escreve dados com coloração
+        for row in df.itertuples(index=False):
+            linha = []
+            for i, valor in enumerate(row):
+                linha.append(valor)
+            ws.append(linha)
+
+        # Aplica cor nas notas < 5
+        for row in ws.iter_rows(min_row=2):
+            for cell in row:
                 try:
                     if isinstance(cell.value, (int, float)) and cell.value < 5:
-                        cell.font = red
+                        cell.fill = red_fill
                 except:
                     pass
 
-        wb.save(path)
+        return wb
 
-    colorir_notas(temp_out.name)
+    wb = exportar_excel_colorido(df_final)
 
-    with open(temp_out.name, "rb") as f:
-        st.download_button(
-            "⬇️ Baixar Planilha Final Unificada",
-            f.read(),
-            file_name="notas_unificadas.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
+    st.download_button(
+        "⬇ Baixar Planilha Final (Notas <5 em Vermelho)",
+        data=lambda: wb.save("notas_unificadas.xlsx"),
+        file_name="notas_unificadas.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+
