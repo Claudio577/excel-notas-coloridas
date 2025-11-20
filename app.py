@@ -1,154 +1,118 @@
 import streamlit as st
 import pandas as pd
-import numpy as np
+import re
 from io import BytesIO
 
-# ---------------------------------------------------------
-# FUNÇÃO ROBUSTA PARA LIMPAR PLANILHA DO MAPÃO
-# ---------------------------------------------------------
-def limpar_planilha(df):
+st.set_page_config(page_title="Unificador de Notas", layout="wide")
 
-    # --- 1) Normalização total (transforma tudo em string simples) ---
-    def normalizar(x):
-        if isinstance(x, (list, tuple, set, dict, np.ndarray, pd.Series, pd.DataFrame)):
-            return ""
-        if pd.isna(x):
-            return ""
-        return str(x).strip()
+st.title("📘 Unificar Notas – 1º, 2º e 3º Bimestres")
 
-    df = df.applymap(normalizar)
+st.write("Envie as três planilhas (1º, 2º e 3º bimestre).")
 
-    # Remove colunas e linhas vazias
-    df = df.loc[:, (df != "").any(axis=0)]
-    df = df[(df != "").any(axis=1)]
 
-    # --- 2) Encontrar linha que contém "ALUNO" ---
-    linha_cab = None
-    for i, row in df.iterrows():
-        if any("aluno" == str(c).lower() for c in row):
-            linha_cab = i
-            break
+# ------------------------------------------------------------
+# Função: encontrar linha onde começa ALUNO
+# ------------------------------------------------------------
+def encontrar_linha_aluno(df):
+    for idx, row in df.iterrows():
+        if row.astype(str).str.contains("ALUNO", case=False, regex=False).any():
+            return idx
+    return None
 
-    if linha_cab is None:
-        st.error("❌ Não encontrei a linha com 'ALUNO' na planilha.")
-        return None
 
-    df.columns = df.iloc[linha_cab].tolist()
-    df = df.iloc[linha_cab + 1:]
+# ------------------------------------------------------------
+# Limpar planilha individual
+# ------------------------------------------------------------
+def limpar_planilha(df_original, sufixo):
+    linha = encontrar_linha_aluno(df_original)
 
-    # Remove colunas Unnamed
-    df = df.loc[:, ~df.columns.astype(str).str.contains("unnamed", case=False)]
+    if linha is None:
+        raise ValueError("Não foi encontrada a linha 'ALUNO' na planilha.")
 
-    # --- 3) Converter automaticamente colunas que contêm números ---
-    colunas_finais = ["ALUNO"]
+    df = pd.read_excel(uploaded_file, header=linha)
 
+    # Remover colunas vazias
+    df = df.dropna(axis=1, how='all')
+
+    # Remover linhas onde ALUNO está vazio ou é texto administrativo
+    df = df[df["ALUNO"].astype(str).str.len() > 3]
+    df = df[~df["ALUNO"].str.contains("Engajamento|Frequência|Compensada", case=False, na=False)]
+
+    # Renomear colunas removendo números
+    novas_colunas = {}
     for col in df.columns:
-        if col == "ALUNO":
-            continue
+        novo = re.sub(r"\d+", "", col).strip().replace("  ", " ")
+        novas_colunas[col] = f"{novo}_{sufixo}"
 
-        valores_convertidos = []
-        for v in df[col]:
-            try:
-                valores_convertidos.append(float(v))
-            except:
-                valores_convertidos.append(np.nan)
+    novas_colunas["ALUNO"] = "ALUNO"  # manter nome original
+    df = df.rename(columns=novas_colunas)
 
-        serie = pd.Series(valores_convertidos)
-
-        # coluna é nota se houver pelo menos 1 número válido
-        if serie.notna().sum() > 0:
-            df[col] = serie
-            colunas_finais.append(col)
-
-    df = df[colunas_finais]
+    # Converter notas para número
+    for col in df.columns:
+        if col != "ALUNO":
+            df[col] = pd.to_numeric(df[col], errors="coerce")
 
     return df
 
 
-# ---------------------------------------------------------
-# FUNÇÃO PARA JUNTAR B1, B2, B3 (ALUNO = chave)
-# ---------------------------------------------------------
-def juntar_bimestres(dfs):
-    df_final = dfs[0]
-    for i in range(1, len(dfs)):
-        df_final = df_final.merge(dfs[i], on="ALUNO", how="outer")
-    return df_final
+# ------------------------------------------------------------
+# Juntar bimestres
+# ------------------------------------------------------------
+def juntar_bimestres(df1, df2, df3):
+    return df1.merge(df2, on="ALUNO", how="outer").merge(df3, on="ALUNO", how="outer")
 
 
-# ---------------------------------------------------------
-# FUNÇÃO PARA GERAR ARQUIVO EXCEL COM NOTAS VERMELHAS
-# ---------------------------------------------------------
+# ------------------------------------------------------------
+# Download com formatação de notas vermelhas
+# ------------------------------------------------------------
 def gerar_excel_colorido(df):
     output = BytesIO()
+    writer = pd.ExcelWriter(output, engine='xlsxwriter')
+    df.to_excel(writer, index=False, sheet_name='Notas', startrow=1)
 
-    with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
-        df.to_excel(writer, index=False, sheet_name="Notas")
+    workbook = writer.book
+    worksheet = writer.sheets['Notas']
 
-        workbook = writer.book
-        worksheet = writer.sheets["Notas"]
+    red_format = workbook.add_format({"font_color": "red"})
 
-        # formato vermelho
-        red_format = workbook.add_format({'font_color': 'red'})
+    # aplicar vermelho onde nota < 5
+    for row in range(2, len(df) + 2):
+        for col in range(1, len(df.columns)):
+            val = df.iloc[row - 2, col]
+            if pd.notna(val) and isinstance(val, (int, float)) and val < 5:
+                worksheet.write(row, col, val, red_format)
 
-        # aplicar coloração
-        for row in range(1, len(df) + 1):
-            for col in range(1, len(df.columns)):
-                try:
-                    valor = df.iloc[row - 1, col]
-                    if not pd.isna(valor) and valor < 5:
-                        worksheet.write(row, col, valor, red_format)
-                except:
-                    pass
-
-    output.seek(0)
-    return output
+    writer.save()
+    return output.getvalue()
 
 
-# ---------------------------------------------------------
-# INTERFACE STREAMLIT
-# ---------------------------------------------------------
-st.title("📘 Unificação de Notas – 1º, 2º e 3º Bimestre")
-st.write("Envie as 3 planilhas do MAPÃO (1°, 2° e 3° bimestre).")
+# ------------------------------------------------------------
+# Uploads
+# ------------------------------------------------------------
+uploaded_b1 = st.file_uploader("📄 Envie o 1º Bimestre", type=["xlsx"])
+uploaded_b2 = st.file_uploader("📄 Envie o 2º Bimestre", type=["xlsx"])
+uploaded_b3 = st.file_uploader("📄 Envie o 3º Bimestre", type=["xlsx"])
 
-uploaded_b1 = st.file_uploader("1º Bimestre", type=["xlsx"])
-uploaded_b2 = st.file_uploader("2º Bimestre", type=["xlsx"])
-uploaded_b3 = st.file_uploader("3º Bimestre", type=["xlsx"])
 
 if uploaded_b1 and uploaded_b2 and uploaded_b3:
-
     st.success("✔ Arquivos carregados! Processando...")
 
-    try:
-        # ler sem header
-        df1 = limpar_planilha(pd.read_excel(uploaded_b1, header=None))
-        df2 = limpar_planilha(pd.read_excel(uploaded_b2, header=None))
-        df3 = limpar_planilha(pd.read_excel(uploaded_b3, header=None))
+    # Processamento
+    df1 = limpar_planilha(pd.read_excel(uploaded_b1, header=None), "B1")
+    df2 = limpar_planilha(pd.read_excel(uploaded_b2, header=None), "B2")
+    df3 = limpar_planilha(pd.read_excel(uploaded_b3, header=None), "B3")
 
-        if df1 is None or df2 is None or df3 is None:
-            st.error("Erro ao ler alguma planilha.")
-            st.stop()
+    final = juntar_bimestres(df1, df2, df3)
 
-        # renomear colunas para diferenciar bimestres
-        df1 = df1.rename(columns={c: f"{c}_B1" for c in df1.columns if c != "ALUNO"})
-        df2 = df2.rename(columns={c: f"{c}_B2" for c in df2.columns if c != "ALUNO"})
-        df3 = df3.rename(columns={c: f"{c}_B3" for c in df3.columns if c != "ALUNO"})
+    st.subheader("📘 Planilha Final (antes da coloração)")
+    st.dataframe(final, height=500)
 
-        # unir
-        df_final = juntar_bimestres([df1, df2, df3])
+    # Arquivo para download
+    excel_final = gerar_excel_colorido(final)
 
-        st.subheader("📄 Planilha Final (antes da coloração)")
-        st.dataframe(df_final)
-
-        # gerar excel colorido
-        excel_file = gerar_excel_colorido(df_final)
-
-        st.download_button(
-            "⬇ Baixar Planilha Final (Notas < 5 em Vermelho)",
-            data=excel_file,
-            file_name="notas_unificadas_coloridas.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
-
-    except Exception as e:
-        st.error("❌ Erro inesperado ao processar.")
-        st.exception(e)
+    st.download_button(
+        label="⬇ Baixar Planilha Unificada (Notas <5 em Vermelho)",
+        data=excel_final,
+        file_name="notas_unificadas.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
