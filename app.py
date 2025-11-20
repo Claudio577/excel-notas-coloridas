@@ -95,7 +95,7 @@ def limpar_planilha(file):
 
 
 # --------------------------------------------------------------
-#  CABEÇALHO (MATÉRIA MESCLADA + 1º/2º/3º Bi)
+#  CABEÇALHO AGRUPADO (MATÉRIA MESCLADA + 1º/2º/3º Bi)
 # --------------------------------------------------------------
 
 def formatar_cabecalho_simples(path, df_final):
@@ -132,6 +132,27 @@ def formatar_cabecalho_simples(path, df_final):
             ws.cell(row=2, column=col_excel + idx, value=f"{idx+1}º Bi")
 
         col_excel += qtd
+
+    wb.save(path)
+
+
+# --------------------------------------------------------------
+#  COLORIR NOTAS VERMELHAS
+# --------------------------------------------------------------
+
+def colorir_notas(path):
+    wb = load_workbook(path)
+    ws = wb.active
+    red = Font(color="FF0000", bold=True)
+
+    for col in range(2, ws.max_column + 1):
+        for row in range(3, ws.max_row + 1):
+            val = ws.cell(row=row, column=col).value
+            try:
+                if isinstance(val, (int, float)) and val < 5:
+                    ws.cell(row=row, column=col).font = red
+            except:
+                pass
 
     wb.save(path)
 
@@ -186,34 +207,52 @@ if file_b1 and file_b2 and file_b3:
     st.subheader("📄 Planilha Final (antes da coloração)")
     st.dataframe(df_final)
 
+    # --------------------------------------------------------------
+    #  GERAR ARQUIVO COMPLETO
+    # --------------------------------------------------------------
+
     temp_out = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
     df_final.to_excel(temp_out.name, index=False, startrow=0)
 
     formatar_cabecalho_simples(temp_out.name, df_final)
-
-    def colorir_notas(path):
-        wb = load_workbook(path)
-        ws = wb.active
-        red = Font(color="FF0000", bold=True)
-
-        for col in range(2, ws.max_column + 1):
-            for row in range(3, ws.max_row + 1):
-                val = ws.cell(row=row, column=col).value
-                try:
-                    if isinstance(val, (int, float)) and val < 5:
-                        ws.cell(row=row, column=col).font = red
-                except:
-                    pass
-
-        wb.save(path)
-
     colorir_notas(temp_out.name)
+
+    # --------------------------------------------------------------
+    #  GERAR ARQUIVO SÓ COM NOTAS VERMELHAS
+    # --------------------------------------------------------------
+
+    df_vermelhas = df_final.copy()
+
+    for col in df_vermelhas.columns:
+        if col == "ALUNO":
+            continue
+        df_vermelhas[col] = df_vermelhas[col].apply(
+            lambda x: x if isinstance(x, (int, float)) and x < 5 else ""
+        )
+
+    temp_out_vermelhas = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
+    df_vermelhas.to_excel(temp_out_vermelhas.name, index=False, startrow=0)
+
+    formatar_cabecalho_simples(temp_out_vermelhas.name, df_vermelhas)
+    colorir_notas(temp_out_vermelhas.name)
+
+    # --------------------------------------------------------------
+    #  BOTÕES DE DOWNLOAD
+    # --------------------------------------------------------------
 
     with open(temp_out.name, "rb") as f:
         st.download_button(
-            "⬇️ Baixar Planilha Final (Formatada + Notas Vermelhas)",
+            "⬇️ Baixar Planilha Completa (Formatada + Notas Vermelhas)",
             f.read(),
             file_name="notas_unificadas.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+
+    with open(temp_out_vermelhas.name, "rb") as f:
+        st.download_button(
+            "⬇️ Baixar SOMENTE Notas Vermelhas",
+            f.read(),
+            file_name="notas_vermelhas.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
 
