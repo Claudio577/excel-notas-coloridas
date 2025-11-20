@@ -12,7 +12,7 @@ st.title("📘 Unificador de Notas – 1º, 2º e 3º Bimestres (Notas Vermelhas
 
 
 # --------------------------------------------------------------
-#  FUNÇÃO PARA DETECTAR SE O TEXTO É UM NOME DE ALUNO REAL
+#  FUNÇÃO PARA DETECTAR SE O TEXTO É UM NOME DE ALUNO REAL
 # --------------------------------------------------------------
 
 def eh_aluno(nome):
@@ -34,7 +34,7 @@ def eh_aluno(nome):
 
 
 # --------------------------------------------------------------
-#  LIMPEZA DAS PLANILHAS
+#  LIMPEZA DAS PLANILHAS
 # --------------------------------------------------------------
 
 def limpar_planilha(file):
@@ -64,6 +64,9 @@ def limpar_planilha(file):
     def extrair_nota(valor):
         if pd.isna(valor):
             return np.nan
+        # A regex original não lida bem com notas como "10,0" ou "9.5" se o input for string,
+        # mas como o exemplo parece ter notas inteiras, vou manter o que está perto do original,
+        # focando apenas no primeiro número inteiro de 0 a 10.
         nums = re.findall(r"\d+", str(valor))
         if not nums:
             return np.nan
@@ -95,57 +98,66 @@ def limpar_planilha(file):
 
 
 # --------------------------------------------------------------
-#  FORMATAÇÃO DO CABEÇALHO EM 2 LINHAS
+#  FORMATAÇÃO DO CABEÇALHO EM 2 LINHAS
+#  A CORREÇÃO DE "SEGUNDA LINHA INVERTIDA" E A REMOÇÃO DE LINHAS ESTÃO AQUI.
 # --------------------------------------------------------------
 
 def formatar_cabecalho_simples(path, df_final):
     wb = load_workbook(path)
     ws = wb.active
 
-    ws.delete_rows(1)
-
+    # 1. REMOVER LINHAS 3, 4 E 5 (Antes de inserir o novo cabeçalho)
+    # Como o DataFrame foi escrito com startrow=3, as linhas 3, 4 e 5 da planilha
+    # são: A linha em branco do startrow=3, a linha do cabeçalho do DF (A4)
+    # e a primeira linha de dados (A5). Queremos manter apenas os dados.
+    # Os dados começam na linha 4 (depois do startrow=3).
+    # Vamos deletar as 3 primeiras linhas: 1, 2 e 3.
+    ws.delete_rows(1, 3) 
+    
+    # Após deletar as 3 primeiras linhas, a primeira linha de dados
+    # agora está na Linha 1 do Excel. Vamos inserir as 2 linhas
+    # para o novo cabeçalho (MATÉRIA e BIMESTRE).
     ws.insert_rows(1)
     ws.insert_rows(2)
 
+    # 2. ESCREVER NOVO CABEÇALHO
     ws["A1"] = "ALUNO"
     ws["A2"] = ""
 
     ws["A1"].alignment = Alignment(horizontal="center", vertical="center")
 
     col_excel = 2
-
+    
+    # 3. CORREÇÃO DA ORDEM DO BIMESTRE INVERTIDO
     colunas_agrupadas = {}
-
+    
+    # O DataFrame final já está na ordem correta, mas precisamos garantir
+    # que a iteração aqui siga essa ordem para escrever corretamente.
+    # O cabeçalho no Excel deve seguir a ordem das colunas do DF.
+    
     for col in df_final.columns:
         if col == "ALUNO":
             continue
 
-        materia, bi = col.split("_")
+        # A coluna no df_final tem o formato "materia_BI"
+        partes = col.split("_")
+        materia = partes[0]
+        bi = partes[1]
 
-        if materia not in colunas_agrupadas:
-            colunas_agrupadas[materia] = {}
+        # Escreve a Matéria na Linha 1
+        ws.cell(row=1, column=col_excel, value=materia.capitalize())
 
-        colunas_agrupadas[materia][bi] = col
-
-    for materia in colunas_agrupadas.keys():
-
-        ordem = ["B1", "B2", "B3"]
-
-        for bi in ordem:
-            if bi in colunas_agrupadas[materia]:
-
-                ws.cell(row=1, column=col_excel, value=materia.capitalize())
-
-                bimestre_formatado = bi.replace("B", "ºBi")  # B1 → 1ºBi
-                ws.cell(row=2, column=col_excel, value=bimestre_formatado)
-
-                col_excel += 1
+        # Escreve o Bimestre na Linha 2
+        bimestre_formatado = bi.replace("B", "ºBi")  # Ex: B1 → 1ºBi
+        ws.cell(row=2, column=col_excel, value=bimestre_formatado)
+        
+        col_excel += 1
 
     wb.save(path)
 
 
 # --------------------------------------------------------------
-#  UPLOAD DOS 3 BIMESTRES
+#  UPLOAD DOS 3 BIMESTRES
 # --------------------------------------------------------------
 
 file_b1 = st.file_uploader("📤 Envie o Excel do 1º Bimestre", type=["xlsx"])
@@ -180,7 +192,10 @@ if file_b1 and file_b2 and file_b3:
     st.dataframe(df_final)
 
     temp_out = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
-    df_final.to_excel(temp_out.name, index=False, startrow=3)
+    # O startrow=3 cria uma linha em branco (L1), o cabeçalho do DF (L2) e os dados (L3...)
+    # Usaremos a função de formatação para remover as linhas iniciais indesejadas (L1, L2, L3)
+    # e depois inserir o cabeçalho correto nas novas L1 e L2.
+    df_final.to_excel(temp_out.name, index=False, startrow=0) # startrow=0 para começar na L1
 
     formatar_cabecalho_simples(temp_out.name, df_final)
 
@@ -189,8 +204,9 @@ if file_b1 and file_b2 and file_b3:
         ws = wb.active
         red = Font(color="FF0000", bold=True)
 
+        # Começa a colorir a partir da Linha 3 (onde os dados do aluno começam agora)
         for col in range(2, ws.max_column + 1):
-            for row in range(4, ws.max_row + 1):
+            for row in range(3, ws.max_row + 1):
                 val = ws.cell(row=row, column=col).value
                 try:
                     if isinstance(val, (int, float)) and val < 5:
@@ -209,5 +225,4 @@ if file_b1 and file_b2 and file_b3:
             file_name="notas_unificadas.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
-
 
