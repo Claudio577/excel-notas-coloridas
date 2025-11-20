@@ -31,7 +31,7 @@ if uploaded_file:
     # Definir limite da nota
     nota_limite = st.number_input(
         "Considere nota baixa abaixo de:",
-        min_value=0.0, max_value=10.0, value=6.0
+        min_value=0.0, max_value=10.0, value=5.0
     )
 
     if st.button("🎨 Colorir notas baixas"):
