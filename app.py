@@ -1,58 +1,53 @@
 import streamlit as st
 import pandas as pd
 import tempfile
+import numpy as np
 
-st.title("📘 Extrator de Notas – Somente Notas Numéricas")
+st.title("📘 Extrator de Notas – Alunos + Matérias + Notas Numéricas")
 
-uploaded_file = st.file_uploader("Envie seu Excel (.xlsx):", type=["xlsx"])
+uploaded_file = st.file_uploader("Envie o Excel (.xlsx):", type=["xlsx"])
 
 if uploaded_file:
     temp_input = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
     temp_input.write(uploaded_file.getbuffer())
     temp_input.close()
 
+    # Ler arquivo cru
     df_raw = pd.read_excel(temp_input.name, header=None)
 
-    # Encontrar linha do cabeçalho
+    # Achar linha que contém "ALUNO"
     linha_cabecalho = df_raw[df_raw.iloc[:, 0] == "ALUNO"].index[0]
 
-    # Ler com cabeçalho correto
+    # Ler com cabeçalho
     df = pd.read_excel(temp_input.name, header=linha_cabecalho)
 
-    # Remover linhas vazias
+    # Remover linhas sem nome de aluno
     df = df.dropna(subset=["ALUNO"])
 
-    # Remover colunas desnecessárias
+    # Remover colunas Unnamed e SITUAÇÃO, TOTAL
     df = df.loc[:, ~df.columns.str.contains("Unnamed")]
     df = df.drop(columns=["SITUAÇÃO", "TOTAL"], errors="ignore")
 
-    # Manter somente notas numéricas
-    colunas_final = ["ALUNO"]
-
+    # Limpar todas as colunas numéricas:
     for col in df.columns:
         if col == "ALUNO":
             continue
 
-        # Testa se é coluna numérica:
-        serie = pd.to_numeric(df[col], errors="coerce")
+        # Converter números; se não for número, vira NaN
+        df[col] = pd.to_numeric(df[col], errors="coerce")
 
-        # Se pelo menos metade da coluna for número, mantemos
-        if serie.notna().sum() >= len(serie) * 0.8:
-            colunas_final.append(col)
-
-    df_final = df[colunas_final]
-
-    st.subheader("📄 Resultado Final (somente notas):")
-    st.dataframe(df_final)
+    st.subheader("📄 Resultado Final: Alunos + Todas as Matérias + Notas Numéricas")
+    st.dataframe(df)
 
     # Salvar arquivo final
     temp_out = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
-    df_final.to_excel(temp_out.name, index=False)
+    df.to_excel(temp_out.name, index=False)
 
     with open(temp_out.name, "rb") as f:
         st.download_button(
-            "⬇️ Baixar Planilha Somente com Notas",
+            "⬇️ Baixar Planilha Final",
             data=f.read(),
             file_name="notas_limpas.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
+
