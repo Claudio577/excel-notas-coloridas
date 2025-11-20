@@ -4,7 +4,7 @@ import tempfile
 import numpy as np
 import re
 
-st.title("📘 Extrator Inteligente de Notas – Limpeza Completa (v4)")
+st.title("📘 Extrator Inteligente de Notas – Limpeza Completa (v5)")
 
 uploaded_file = st.file_uploader("Envie o Excel (.xlsx):", type=["xlsx"])
 
@@ -23,7 +23,6 @@ if uploaded_file:
     df = df.loc[:, ~df.columns.str.contains("Unnamed")]
     df = df.drop(columns=["SITUAÇÃO", "TOTAL"], errors="ignore")
 
-    # Função para extrair somente notas (0–10)
     def extrair_nota(valor):
         if pd.isna(valor):
             return np.nan
@@ -39,15 +38,12 @@ if uploaded_file:
     for col in df.columns:
         if col == "ALUNO":
             continue
-
         df[col] = df[col].apply(extrair_nota)
-
-        if df[col].dropna().empty:  # remove colunas sem notas
+        if df[col].dropna().empty:
             colunas_para_remover.append(col)
 
     df = df.drop(columns=colunas_para_remover, errors="ignore")
 
-    # --- RENOMEAR COLUNAS: remover códigos numéricos ---
     def limpar_nome_coluna(nome):
         base = re.split(r"\d+", nome)[0].strip()
         return base if base else nome
@@ -62,8 +58,30 @@ if uploaded_file:
 
     with open(temp_out.name, "rb") as f:
         st.download_button(
-            "⬇️ Baixar Planilha Final",
+            "⬇️ Baixar Planilha Final Completa",
             data=f.read(),
             file_name="notas_limpas.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
+
+    # ---- BOTÃO PARA NOTAS VERMELHAS ----
+    st.subheader("📌 Filtrar alunos com notas vermelhas (<5)")
+
+    if st.button("Mostrar somente alunos com nota vermelha"):
+        col_notas = [c for c in df.columns if c != "ALUNO"]
+        filtro = df[col_notas].lt(5).any(axis=1)
+        df_vermelhas = df[filtro]
+
+        st.subheader("🚨 Alunos com notas vermelhas:")
+        st.dataframe(df_vermelhas)
+
+        temp_vermelhas = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
+        df_vermelhas.to_excel(temp_vermelhas.name, index=False)
+
+        with open(temp_vermelhas.name, "rb") as f:
+            st.download_button(
+                "⬇️ Baixar alunos com notas vermelhas",
+                data=f.read(),
+                file_name="notas_vermelhas.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
